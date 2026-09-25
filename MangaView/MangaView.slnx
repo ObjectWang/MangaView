@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MangaView.App/MangaView.App.csproj" />
+    <Project Path="src/MangaView.Core/MangaView.Core.csproj" />
+    <Project Path="src/MangaView.TestDataGen/MangaView.TestDataGen.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MangaView.Core.Tests/MangaView.Core.Tests.csproj" />
+  </Folder>
+</Solution>

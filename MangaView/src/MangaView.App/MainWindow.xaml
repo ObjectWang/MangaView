@@ -1,0 +1,65 @@
+<Window x:Class="MangaView.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:MangaView.App"
+        Title="MangaView — M0 技术验证（Webtoon 虚拟滚动）"
+        Width="1280" Height="860" WindowStartupLocation="CenterScreen"
+        AllowDrop="True" Drop="OnDrop" DragOver="OnDragOver"
+        PreviewKeyDown="OnPreviewKeyDown"
+        UseLayoutRounding="True">
+    <DockPanel>
+        <Menu x:Name="TopMenu" DockPanel.Dock="Top">
+            <MenuItem Header="文件(_F)">
+                <MenuItem Header="打开文件夹(_O)…" InputGestureText="Ctrl+O" Click="OnOpenFolderClick"/>
+                <Separator/>
+                <MenuItem Header="退出(_X)" Click="OnExitClick"/>
+            </MenuItem>
+            <MenuItem Header="视图(_V)">
+                <MenuItem Header="切换明暗主题(_T)" InputGestureText="Ctrl+T" Click="OnToggleThemeClick"/>
+                <MenuItem Header="页面间距(_G)">
+                    <MenuItem Header="无缝拼接" Tag="0" Click="OnGapClick"/>
+                    <MenuItem Header="8 像素" Tag="8" Click="OnGapClick"/>
+                    <MenuItem Header="16 像素" Tag="16" Click="OnGapClick"/>
+                </MenuItem>
+                <MenuItem Header="全屏(_F)" InputGestureText="F11" Click="OnFullscreenClick"/>
+            </MenuItem>
+        </Menu>
+
+        <Border x:Name="BottomBar" DockPanel.Dock="Bottom" Padding="10,6">
+            <DockPanel>
+                <TextBlock x:Name="PageInfoText" Text="未打开" VerticalAlignment="Center" Width="130"/>
+                <TextBlock x:Name="ScanText" Text="" VerticalAlignment="Center" Opacity="0.7"/>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock Text="跳转到页" VerticalAlignment="Center" Opacity="0.7"/>
+                    <TextBox x:Name="JumpBox" Width="64" Margin="4,0" PreviewKeyDown="OnJumpBoxKeyDown"/>
+                    <Button x:Name="JumpButton" Content="跳转" Margin="0,0,12,0" Click="OnJumpClick"/>
+                    <TextBlock x:Name="FpsText" Text="FPS: --" Width="90" VerticalAlignment="Center" Opacity="0.7"/>
+                    <Button x:Name="ThemeButton" Content="主题" Click="OnToggleThemeClick"/>
+                </StackPanel>
+                <ProgressBar x:Name="ScrollProgress" Height="6" VerticalAlignment="Center"
+                             Maximum="1" Value="0" BorderThickness="0"
+                             MouseLeftButtonDown="OnProgressClick"/>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <ScrollViewer x:Name="ScrollHost" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          ScrollChanged="OnScrollChanged"
+                          PreviewMouseWheel="OnPreviewMouseWheel">
+                <local:WebtoonCanvas x:Name="Webtoon"/>
+            </ScrollViewer>
+            <Border x:Name="PageBubbleBorder" Visibility="Collapsed"
+                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,16,0,0"
+                    CornerRadius="8" Padding="14,7">
+                <Border.Background>
+                    <SolidColorBrush Color="#C8141414"/>
+                </Border.Background>
+                <TextBlock x:Name="PageBubble" Foreground="White" FontSize="17"/>
+            </Border>
+            <TextBlock x:Name="EmptyHint" Text="拖入图片文件夹，或按 Ctrl+O 打开"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       FontSize="20" Opacity="0.6"/>
+        </Grid>
+    </DockPanel>
+</Window>

@@ -1,0 +1,8 @@
+bin/
+obj/
+.vs/
+*.user
+MangaView/testdata/
+.dotnet-home/
+.nuget-appdata/
+.nuget-localappdata/
