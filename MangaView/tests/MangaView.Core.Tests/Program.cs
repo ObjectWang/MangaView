@@ -18,6 +18,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("DoublePageLayout: 封面页与阅读方向", TestDoublePageLayout),
     ("ReadingProgressStore: JSON 保存/恢复", TestProgressStore),
     ("ReadingProgressStore: 损坏 JSON 容错", TestProgressStoreCorruptJson),
+    ("BookmarkStore: 新增/重命名/删除", TestBookmarkStore),
+    ("RecentStore: 去重与清空", TestRecentStore),
+    ("AppSettingsStore: M4 设置往返", TestM4SettingsStore),
     ("CbzArchive: 自然排序与安全缓存", TestCbzArchive),
     ("CbzArchive: 损坏压缩包报错", TestCbzInvalidArchive),
 };
@@ -439,6 +442,89 @@ static async Task TestProgressStoreCorruptJson()
         File.WriteAllText(file, "{ not valid json");
         var store = new ReadingProgressStore(file);
         AssertTrue(store.Get(@"D:\books\demo.cbz") is null, "损坏进度应回退为空");
+    }
+    finally
+    {
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+}
+
+static async Task TestBookmarkStore()
+{
+    string dir = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string file = Path.Combine(dir, "bookmarks.json");
+    try
+    {
+        var store = new BookmarkStore(file);
+        var bookmark = store.Add("book-a", "开头", 3, ReadingMode.Webtoon, new ScrollAnchor(3, 120));
+        var loaded = new BookmarkStore(file).Get("book-a");
+        AssertEqual(1, loaded.Count, "书签数量");
+        AssertEqual("开头", loaded[0].Name, "书签名称");
+        AssertEqual(3, loaded[0].PageIndex, "书签页");
+        AssertTrue(store.Rename("book-a", bookmark.Id, "重命名"), "重命名结果");
+        AssertEqual("重命名", store.Get("book-a")[0].Name, "重命名后名称");
+        AssertTrue(store.Delete("book-a", bookmark.Id), "删除结果");
+        AssertEqual(0, store.Get("book-a").Count, "删除后的数量");
+    }
+    finally
+    {
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+}
+
+static async Task TestRecentStore()
+{
+    string dir = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string file = Path.Combine(dir, "recent.json");
+    try
+    {
+        var store = new RecentStore(file);
+        store.Add(@"D:\books\a.cbz", RecentKind.Archive);
+        store.Add(@"D:\books\a.cbz", RecentKind.Archive);
+        store.Add(@"D:\books\folder", RecentKind.Folder);
+        AssertEqual(2, store.Entries.Count, "去重后的数量");
+        AssertEqual(@"D:\books\folder", store.Entries[0].Path, "最新记录");
+        store.Clear();
+        AssertEqual(0, store.Entries.Count, "清空记录");
+    }
+    finally
+    {
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+}
+
+static async Task TestM4SettingsStore()
+{
+    string dir = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string file = Path.Combine(dir, "settings.json");
+    try
+    {
+        var store = new AppSettingsStore(file);
+        var settings = AppSettings.Default with
+        {
+            Theme = ThemePreference.Dark,
+            SaveRecent = false,
+            RememberProgress = false,
+            ShowInfoPanel = true,
+            ShowThumbnails = true,
+            SlideshowIntervalSeconds = 12,
+            SlideshowRandom = true,
+            SlideshowLoop = false,
+            SlideshowHideControls = true,
+            HdrEnabled = true,
+            WindowPlacement = new WindowPlacement(10, 20, 1280, 800, true, @"\\.\DISPLAY2"),
+        };
+        store.Update(settings);
+        store.Save();
+        var loaded = new AppSettingsStore(file);
+        loaded.Load();
+        AssertEqual(ThemePreference.Dark, loaded.Settings.Theme, "主题");
+        AssertTrue(!loaded.Settings.SaveRecent, "最近记录开关");
+        AssertTrue(loaded.Settings.ShowInfoPanel && loaded.Settings.ShowThumbnails, "面板开关");
+        AssertEqual(12, loaded.Settings.SlideshowIntervalSeconds, "幻灯片间隔");
+        AssertTrue(loaded.Settings.SlideshowRandom, "随机播放");
+        AssertTrue(!loaded.Settings.SlideshowLoop, "循环播放");
+        AssertEqual(@"\\.\DISPLAY2", loaded.Settings.WindowPlacement?.MonitorDeviceName, "显示器");
     }
     finally
     {

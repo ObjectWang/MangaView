@@ -6,3 +6,4 @@ MangaView/testdata/
 .dotnet-home/
 .nuget-appdata/
 .nuget-localappdata/
+artifacts/

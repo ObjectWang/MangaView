@@ -3,12 +3,25 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>MangaView.App</RootNamespace>
+    <AssemblyName>MangaView</AssemblyName>
+    <Product>MangaView</Product>
+    <Description>Local-first high-performance image and comic viewer.</Description>
+    <Authors>ObjectWang</Authors>
+    <Version>1.0.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\MangaView.Core\MangaView.Core.csproj" />
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+    <None Include="$(NuGetPackageRoot)libheif.native.runtime/1.20.2/runtimes/win-x64/native/libheif.dll"
+          Link="libheif.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Condition="'$(RuntimeIdentifier)' == 'win-x64' and Exists('$(NuGetPackageRoot)libheif.native.runtime/1.20.2/runtimes/win-x64/native/libheif.dll')" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="LibHeif.Native.Runtime" Version="1.20.2">

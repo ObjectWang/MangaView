@@ -166,7 +166,7 @@ public partial class MainWindow
     {
         int generation = ++_loadGeneration;
         _sourceKey = sourceKey;
-        ReadingProgress? saved = _progressStore.Get(sourceKey);
+        ReadingProgress? saved = _settings.RememberProgress ? _progressStore.Get(sourceKey) : null;
         _lastWebtoonAnchor = saved?.Anchor ?? new ScrollAnchor(initialIndex, 0);
         _webtoonAnchorDirty = false;
         _suppressProgressSave = true;
@@ -184,6 +184,9 @@ public partial class MainWindow
             ApplySavedSettings(saved);
             ApplyPlaylist(startIndex);
             RestoreSavedNavigation(saved);
+            RecordCurrentSourceRecent();
+            UpdateThumbnailPages();
+            RefreshBookmarksMenu();
 
             EmptyHint.Visibility = Visibility.Collapsed;
             Title = $"MangaView — {title}";
@@ -244,12 +247,13 @@ public partial class MainWindow
 
     private void ApplySavedSettings(ReadingProgress? saved)
     {
-        _mode = saved is not null && Enum.IsDefined(saved.Mode) ? saved.Mode : ReadingMode.SinglePage;
+        _mode = saved is not null && Enum.IsDefined(saved.Mode) ? saved.Mode : _settings.DefaultMode;
         _direction = saved is not null && Enum.IsDefined(saved.Direction)
             ? saved.Direction
-            : ReadingDirection.LeftToRight;
-        _doubleCoverPage = saved?.DoubleCoverPage ?? true;
+            : _settings.DefaultDirection;
+        _doubleCoverPage = saved?.DoubleCoverPage ?? _settings.DefaultDoubleCoverPage;
         _doubleGap = saved is { DoubleGap: >= 0 } ? saved.DoubleGap : 12;
+        Webtoon.Gap = Math.Max(0, _settings.WebtoonGap);
         UpdateDoubleSettingsUi();
 
         if (_mode == ReadingMode.SinglePage && saved is not null)
@@ -297,6 +301,7 @@ public partial class MainWindow
                 DoublePage.Configure(_direction, _doubleCoverPage, _doubleGap);
                 DoublePage.SetPages(_pages);
                 DoublePage.GoToPage(page);
+                UpdateThumbnailPages();
                 break;
             }
         }
@@ -304,14 +309,14 @@ public partial class MainWindow
 
     private void ScheduleProgressSave()
     {
-        if (_suppressProgressSave || _sourceKey is null || _pages.Count == 0) return;
+        if (!_settings.RememberProgress || _suppressProgressSave || _sourceKey is null || _pages.Count == 0) return;
         _progressSaveTimer.Stop();
         _progressSaveTimer.Start();
     }
 
     private void SaveProgressNow()
     {
-        if (_sourceKey is null || _pages.Count == 0) return;
+        if (!_settings.RememberProgress || _sourceKey is null || _pages.Count == 0) return;
         try
         {
             int page = Math.Clamp(_currentPageIndex, 0, _pages.Count - 1);
@@ -505,9 +510,11 @@ public partial class MainWindow
         _pages.Clear();
         _currentPageIndex = -1;
         _sourceKey = null;
+        RefreshBookmarksMenu();
         SinglePage.SetPages(_pages, 0);
         Webtoon.SetPages(_pages);
         DoublePage.SetPages(_pages);
+        UpdateThumbnailPages();
         EmptyHint.Visibility = Visibility.Visible;
         Title = "MangaView";
         ScanText.Text = message;

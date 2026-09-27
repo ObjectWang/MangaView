@@ -15,6 +15,14 @@
                 <MenuItem Header="打开压缩包(_A)…" InputGestureText="Ctrl+Alt+O" Click="OnOpenArchiveClick"/>
                 <MenuItem x:Name="RecursiveMenuItem" Header="加载子文件夹" IsCheckable="True"
                           Click="OnToggleRecursiveClick"/>
+                <MenuItem x:Name="RecentMenuItem" Header="最近打开(_R)">
+                    <MenuItem x:Name="RecentItemsMenuItem" Header="最近项目"/>
+                    <Separator/>
+                    <MenuItem Header="清除最近记录" Click="OnClearRecentClick"/>
+                    <MenuItem x:Name="SaveRecentMenuItem" Header="保存最近记录" IsCheckable="True"
+                              Click="OnToggleSaveRecentClick"/>
+                    <Separator/>
+                </MenuItem>
                 <Separator/>
                 <MenuItem Header="退出(_X)" Click="OnExitClick"/>
             </MenuItem>
@@ -27,6 +35,28 @@
                     <MenuItem x:Name="DoubleModeMenuItem" Header="智能双页模式"
                               IsCheckable="True" Click="OnDoubleModeClick"/>
                 </MenuItem>
+                <MenuItem x:Name="InfoPanelMenuItem" Header="显示信息面板(_I)" InputGestureText="Tab"
+                          IsCheckable="True" Click="OnToggleInfoPanelClick"/>
+                <MenuItem x:Name="ThumbnailMenuItem" Header="显示缩略图栏(_T)" InputGestureText="T"
+                          IsCheckable="True" Click="OnToggleThumbnailClick"/>
+                <MenuItem x:Name="RememberProgressMenuItem" Header="记住每本书阅读进度"
+                          IsCheckable="True" Click="OnToggleRememberProgressClick"/>
+                <MenuItem Header="阅读偏好(_P)">
+                    <MenuItem x:Name="DefaultSingleModeMenuItem" Header="默认单页" IsCheckable="True"
+                              Click="OnDefaultSingleModeClick"/>
+                    <MenuItem x:Name="DefaultWebtoonModeMenuItem" Header="默认 Webtoon" IsCheckable="True"
+                              Click="OnDefaultWebtoonModeClick"/>
+                    <MenuItem x:Name="DefaultDoubleModeMenuItem" Header="默认智能双页" IsCheckable="True"
+                              Click="OnDefaultDoubleModeClick"/>
+                    <Separator/>
+                    <MenuItem x:Name="DefaultLeftToRightMenuItem" Header="默认左到右" IsCheckable="True"
+                              Click="OnDefaultLeftToRightClick"/>
+                    <MenuItem x:Name="DefaultRightToLeftMenuItem" Header="默认右到左" IsCheckable="True"
+                              Click="OnDefaultRightToLeftClick"/>
+                    <MenuItem x:Name="DefaultCoverMenuItem" Header="默认第一页作为独立封面"
+                              IsCheckable="True" Click="OnDefaultCoverClick"/>
+                </MenuItem>
+                <Separator/>
                 <MenuItem Header="双页设置(_D)">
                     <MenuItem x:Name="LeftToRightMenuItem" Header="阅读方向：左到右"
                               IsCheckable="True" IsChecked="True" Click="OnLeftToRightClick"/>
@@ -65,8 +95,44 @@
                     <MenuItem Header="16 像素" Tag="16" Click="OnGapClick"/>
                 </MenuItem>
                 <Separator/>
-                <MenuItem Header="切换明暗主题(_T)" InputGestureText="Ctrl+T" Click="OnToggleThemeClick"/>
+                <MenuItem Header="主题(_T)">
+                    <MenuItem x:Name="ThemeSystemMenuItem" Header="跟随系统" IsCheckable="True"
+                              Click="OnThemeSystemClick"/>
+                    <MenuItem x:Name="ThemeLightMenuItem" Header="浅色" IsCheckable="True"
+                              Click="OnThemeLightClick"/>
+                    <MenuItem x:Name="ThemeDarkMenuItem" Header="深色" IsCheckable="True"
+                              Click="OnThemeDarkClick"/>
+                </MenuItem>
+                <MenuItem x:Name="HdrMenuItem" Header="HDR / 高级颜色" IsCheckable="True"
+                          Click="OnHdrClick"/>
+                <MenuItem Header="移动到下一个显示器(_M)" Click="OnMoveToNextMonitorClick"/>
                 <MenuItem Header="全屏(_F)" InputGestureText="F11" Click="OnFullscreenClick"/>
+            </MenuItem>
+            <MenuItem Header="书签(_K)">
+                <MenuItem Header="添加书签(_A)" InputGestureText="B" Click="OnAddBookmarkClick"/>
+                <MenuItem Header="管理书签(_M)…" InputGestureText="Ctrl+B" Click="OnManageBookmarksClick"/>
+                <Separator/>
+                <MenuItem x:Name="BookmarksJumpMenuItem" Header="跳转到书签"/>
+            </MenuItem>
+            <MenuItem Header="幻灯片(_S)">
+                <MenuItem x:Name="SlideshowToggleMenuItem" Header="开始 / 暂停" InputGestureText="F5"
+                          Click="OnSlideshowToggleClick"/>
+                <MenuItem Header="停止" InputGestureText="Esc" Click="OnSlideshowStopClick"/>
+                <MenuItem Header="播放间隔(_I)">
+                    <MenuItem Header="1 秒" Tag="1" Click="OnSlideshowIntervalClick"/>
+                    <MenuItem Header="3 秒" Tag="3" Click="OnSlideshowIntervalClick"/>
+                    <MenuItem Header="5 秒" Tag="5" Click="OnSlideshowIntervalClick"/>
+                    <MenuItem Header="10 秒" Tag="10" Click="OnSlideshowIntervalClick"/>
+                    <MenuItem Header="30 秒" Tag="30" Click="OnSlideshowIntervalClick"/>
+                    <Separator/>
+                    <MenuItem Header="自定义…" Click="OnSlideshowCustomIntervalClick"/>
+                </MenuItem>
+                <MenuItem x:Name="SlideshowRandomMenuItem" Header="随机播放" IsCheckable="True"
+                          Click="OnSlideshowRandomClick"/>
+                <MenuItem x:Name="SlideshowLoopMenuItem" Header="循环播放" IsCheckable="True"
+                          Click="OnSlideshowLoopClick"/>
+                <MenuItem x:Name="SlideshowHideControlsMenuItem" Header="自动隐藏控件" IsCheckable="True"
+                          Click="OnSlideshowHideControlsClick"/>
             </MenuItem>
         </Menu>
 
@@ -98,6 +164,9 @@
             </DockPanel>
         </Border>
 
+        <local:ThumbnailStrip x:Name="ThumbnailBar" DockPanel.Dock="Bottom" Height="122"
+                              Visibility="Collapsed" PageRequested="OnThumbnailPageRequested"/>
+
         <Grid>
             <ScrollViewer x:Name="ScrollHost" VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Auto"
@@ -125,6 +194,18 @@
             <TextBlock x:Name="EmptyHint" Text="拖入图片或文件夹，或按 Ctrl+O 打开图片"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
                        FontSize="20" Opacity="0.6" IsHitTestVisible="False"/>
+            <Border x:Name="InfoPanel" Width="360" HorizontalAlignment="Right"
+                    VerticalAlignment="Stretch" Visibility="Collapsed" Padding="14,12"
+                    BorderThickness="1,0,0,0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="信息" FontSize="18" FontWeight="SemiBold"
+                               Margin="0,0,0,10"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <TextBlock x:Name="InfoText" TextWrapping="Wrap" FontFamily="Microsoft YaHei UI"
+                                   FontSize="12" LineHeight="18"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
         </Grid>
     </DockPanel>
 </Window>

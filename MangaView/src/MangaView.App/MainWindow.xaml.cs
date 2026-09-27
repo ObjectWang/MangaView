@@ -45,6 +45,7 @@ public partial class MainWindow : Window
         Webtoon.CurrentPageChanged += OnWebtoonPageChanged;
         DoublePage.CurrentPageChanged += OnDoublePageChanged;
         InitializeM2Session();
+        InitializeM4Session();
 
         _fpsTimer.Tick += OnFpsTimerTick;
         _fpsTimer.Start();
@@ -59,6 +60,7 @@ public partial class MainWindow : Window
             CompositionTarget.Rendering -= OnCompositionRendering;
             _fpsTimer.Stop();
             ShutdownM2Session();
+            ShutdownM4Session();
         };
 
         string[] args = Environment.GetCommandLineArgs();
@@ -306,6 +308,8 @@ public partial class MainWindow : Window
         if (count == 0) return;
         _currentPageIndex = index;
         PageInfoText.Text = $"页 {index + 1} / {count}";
+        ThumbnailBar.SetCurrentPage(index);
+        QueueMetadataRefresh();
         UpdateProgressBar();
         ScheduleProgressSave();
         _ = ShowPageBubbleAsync(index, count);
@@ -550,6 +554,7 @@ public partial class MainWindow : Window
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.FocusedElement is TextBox) return;
+        if (HandleM4Key(e)) return;
 
         bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
         bool shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
@@ -829,8 +834,11 @@ public partial class MainWindow : Window
 
     private void ToggleTheme()
     {
-        _darkTheme = !_darkTheme;
+        _themePreference = _darkTheme ? ThemePreference.Light : ThemePreference.Dark;
+        _darkTheme = ResolveDarkTheme(_themePreference);
+        RefreshThemeMenuChecks();
         ApplyTheme();
+        SaveM4Settings();
     }
 
     private void ApplyTheme()
@@ -872,6 +880,10 @@ public partial class MainWindow : Window
         JumpBox.BorderBrush = Make(border);
         ScrollProgress.Background = Make(input);
         ScrollProgress.Foreground = Make(Color.FromRgb(0x4F, 0x8C, 0xC9));
+        InfoPanel.Background = Make(panel);
+        InfoPanel.BorderBrush = Make(border);
+        InfoText.Foreground = Make(fg);
+        ThumbnailBar.Background = Make(panel);
     }
 
     private void OnFullscreenClick(object sender, RoutedEventArgs e) => ToggleFullscreen();

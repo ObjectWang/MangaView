@@ -110,15 +110,41 @@ public sealed record AppSettings(
     ReadingDirection DefaultDirection,
     bool DefaultDoubleCoverPage,
     double WebtoonGap,
-    bool DarkTheme)
+    bool DarkTheme,
+    ThemePreference Theme = ThemePreference.System,
+    bool SaveRecent = true,
+    bool RememberProgress = true,
+    bool ShowInfoPanel = false,
+    bool ShowThumbnails = false,
+    int SlideshowIntervalSeconds = 5,
+    bool SlideshowRandom = false,
+    bool SlideshowLoop = true,
+    bool SlideshowHideControls = false,
+    bool HdrEnabled = false,
+    WindowPlacement? WindowPlacement = null)
 {
     public static AppSettings Default { get; } = new(
-        ReadingMode.Webtoon,
+        ReadingMode.SinglePage,
         ReadingDirection.LeftToRight,
         true,
         8,
         true);
 }
+
+public enum ThemePreference
+{
+    System,
+    Light,
+    Dark,
+}
+
+public sealed record WindowPlacement(
+    double Left,
+    double Top,
+    double Width,
+    double Height,
+    bool Maximized,
+    string? MonitorDeviceName);
 
 public sealed class AppSettingsStore
 {
@@ -139,8 +165,15 @@ public sealed class AppSettingsStore
         lock (_gate)
         {
             if (!File.Exists(FilePath)) { Settings = AppSettings.Default; return; }
-            using var stream = File.OpenRead(FilePath);
-            Settings = JsonSerializer.Deserialize<AppSettings>(stream, JsonOptions) ?? AppSettings.Default;
+            try
+            {
+                using var stream = File.OpenRead(FilePath);
+                Settings = JsonSerializer.Deserialize<AppSettings>(stream, JsonOptions) ?? AppSettings.Default;
+            }
+            catch (JsonException)
+            {
+                Settings = AppSettings.Default;
+            }
         }
     }
 
