@@ -7,3 +7,4 @@ MangaView/testdata/
 .nuget-appdata/
 .nuget-localappdata/
 artifacts/
+/manga-view-requirements.md
