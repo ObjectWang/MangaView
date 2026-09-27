@@ -409,7 +409,8 @@ static async Task TestProgressStore()
             DoubleGap: 12,
             UpdatedUtc: DateTime.UtcNow,
             ZoomMode: ZoomMode.FitWidth,
-            ZoomScale: 2.5);
+            ZoomScale: 2.5,
+            WebtoonZoom: 1.75);
         store.Update(progress);
         store.Save();
 
@@ -425,6 +426,7 @@ static async Task TestProgressStore()
         AssertEqual(12.0, actual.DoubleGap, "双页间距");
         AssertEqual(ZoomMode.FitWidth, actual.ZoomMode, "缩放模式");
         AssertEqual(2.5, actual.ZoomScale, "缩放比例");
+        AssertEqual(1.75, actual.WebtoonZoom, "Webtoon 缩放");
     }
     finally
     {

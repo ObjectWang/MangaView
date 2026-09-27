@@ -14,12 +14,16 @@ namespace MangaView.App;
 /// </summary>
 public sealed class WebtoonCanvas : FrameworkElement
 {
+    private const double MinZoomFactor = 0.05;
+    private const double MaxZoomFactor = 8.0;
+
     private IReadOnlyList<ImagePage> _pages = Array.Empty<ImagePage>();
     private WebtoonLayout? _layout;
     private double _gap = 8;
     private double _offset;
     private double _viewportWidth;
     private double _viewportHeight;
+    private double _zoomFactor = 1.0;
     private readonly LruCache<object> _cache = new(512L * 1024 * 1024);
     private readonly DecodeScheduler _scheduler = new(new WpfDecodeWorker(), maxConcurrent: 2);
     private readonly HashSet<string> _failed = new();
@@ -27,9 +31,12 @@ public sealed class WebtoonCanvas : FrameworkElement
 
     public event Action<double>? OffsetChangeRequested;
     public event Action<int, int>? CurrentPageChanged;
+    public event Action<double>? ZoomChanged;
     public int CurrentPageIndex { get; private set; } = -1;
     public int PageCount => _pages.Count;
     public double TotalHeight => _layout?.TotalHeight ?? 0;
+    public double ZoomFactor => _zoomFactor;
+    public double ZoomPercent => _zoomFactor * 100.0;
 
     /// <summary>当前滚动锚点：页码 + 页内偏移，用于阅读进度保存/恢复。</summary>
     public ScrollAnchor CurrentAnchor => _layout?.GetAnchor(_offset) ?? default;
@@ -44,6 +51,54 @@ public sealed class WebtoonCanvas : FrameworkElement
         _layout is null || _pages.Count == 0 ? 0 : _layout.OffsetFromAnchor(anchor);
 
     public void JumpToOffset(double offset) => OffsetChangeRequested?.Invoke(Math.Max(0, offset));
+
+    public void SetZoomFactor(double factor)
+    {
+        _zoomFactor = Math.Clamp(factor, MinZoomFactor, MaxZoomFactor);
+        RebuildLayout(preserveAnchor: false);
+        InvalidateVisual();
+        ZoomChanged?.Invoke(ZoomPercent);
+    }
+
+    public void ResetZoom()
+    {
+        _zoomFactor = 1.0;
+        RebuildLayout(preserveAnchor: false);
+        InvalidateVisual();
+        ZoomChanged?.Invoke(ZoomPercent);
+    }
+
+    /// <summary>以宿主视口中的鼠标位置缩放，并返回缩放后应设置的滚动偏移。</summary>
+    public (double HorizontalOffset, double VerticalOffset) ZoomAt(
+        double factor, Point viewportPoint, double horizontalOffset, double verticalOffset)
+    {
+        if (_layout is null || _pages.Count == 0 || !double.IsFinite(factor) || factor <= 0)
+            return (horizontalOffset, verticalOffset);
+
+        WebtoonLayout oldLayout = _layout;
+        ScrollAnchor anchor = oldLayout.GetAnchor(verticalOffset + viewportPoint.Y);
+        int pageIndex = Math.Clamp(anchor.PageIndex, 0, _pages.Count - 1);
+        double oldPageHeight = oldLayout.PageHeight(pageIndex);
+        double pageRatioY = oldPageHeight > 0 ? Math.Clamp(anchor.InPageOffset / oldPageHeight, 0, 1) : 0;
+
+        double oldDrawWidth = oldLayout.ViewportWidth;
+        double oldCanvasWidth = Math.Max(_viewportWidth, oldDrawWidth);
+        double oldPageLeft = Math.Max(0, (oldCanvasWidth - oldDrawWidth) / 2);
+        double contentX = horizontalOffset + viewportPoint.X - oldPageLeft;
+        double pageRatioX = Math.Clamp(contentX / Math.Max(1, oldDrawWidth), 0, 1);
+
+        _zoomFactor = Math.Clamp(_zoomFactor * factor, MinZoomFactor, MaxZoomFactor);
+        RebuildLayout(preserveAnchor: false);
+
+        double newPageHeight = _layout!.PageHeight(pageIndex);
+        double newDrawWidth = _layout.ViewportWidth;
+        double newCanvasWidth = Math.Max(_viewportWidth, newDrawWidth);
+        double newPageLeft = Math.Max(0, (newCanvasWidth - newDrawWidth) / 2);
+        double newVertical = _layout.PageTop(pageIndex) + pageRatioY * newPageHeight - viewportPoint.Y;
+        double newHorizontal = newPageLeft + pageRatioX * newDrawWidth - viewportPoint.X;
+        ZoomChanged?.Invoke(ZoomPercent);
+        return (Math.Max(0, newHorizontal), Math.Max(0, newVertical));
+    }
 
     public void SetViewport(double width, double height)
     {
@@ -110,10 +165,11 @@ public sealed class WebtoonCanvas : FrameworkElement
 
     private void RebuildLayout(bool preserveAnchor)
     {
-        double width = Math.Max(1, ActualWidth > 0 ? ActualWidth : _viewportWidth);
+        double viewportWidth = Math.Max(1, _viewportWidth > 0 ? _viewportWidth : ActualWidth);
         WebtoonLayout? old = _layout;
         ScrollAnchor anchor = old is not null && preserveAnchor ? old.GetAnchor(_offset) : default;
-        _layout = new WebtoonLayout(_pages, width, _gap);
+        _layout = new WebtoonLayout(_pages, viewportWidth * _zoomFactor, _gap);
+        Width = Math.Max(viewportWidth, _layout.ViewportWidth);
         Height = _layout.TotalHeight;
         if (preserveAnchor && old is not null && _layout.Pages.Count > 0)
         {
@@ -123,42 +179,34 @@ public sealed class WebtoonCanvas : FrameworkElement
             double ratio = oldH > 0 ? anchor.InPageOffset / oldH : 0;
             OffsetChangeRequested?.Invoke(_layout.PageTop(pi) + ratio * _layout.PageHeight(pi));
         }
-        else
-        {
-            _offset = 0;
-        }
     }
 
     protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
     {
         base.OnRenderSizeChanged(sizeInfo);
-        if (sizeInfo.WidthChanged)
-        {
-            RebuildLayout(preserveAnchor: true);
-            InvalidateVisual();
-        }
+        InvalidateVisual();
     }
 
     private void RequestDecodes(double top, double bottom)
     {
-        int viewportWidth = Math.Max(1, (int)Math.Ceiling(ActualWidth));
         int[] visible = _layout!.PagesIntersecting(top, bottom).ToArray();
         foreach (int i in visible)
-            Request(i, viewportWidth, DecodePriority.Viewport);
+            Request(i, DecodePriority.Viewport);
         if (visible.Length > 0)
         {
             if (visible[0] > 0)
-                Request(visible[0] - 1, viewportWidth, DecodePriority.Preload);
+                Request(visible[0] - 1, DecodePriority.Preload);
             if (visible[^1] < _pages.Count - 1)
-                Request(visible[^1] + 1, viewportWidth, DecodePriority.Preload);
+                Request(visible[^1] + 1, DecodePriority.Preload);
         }
     }
 
-    private void Request(int index, int viewportWidth, DecodePriority priority)
+    private void Request(int index, DecodePriority priority)
     {
         var page = _pages[index];
-        // 不放大小图：解码宽度 = min(视口宽, 原图宽)
-        int decodeWidth = Math.Min(viewportWidth, Math.Max(1, page.Width));
+        // 不放大小图：解码宽度 = min(缩放后的布局宽度, 原图宽)
+        int layoutWidth = Math.Max(1, (int)Math.Ceiling(_layout?.ViewportWidth ?? _viewportWidth));
+        int decodeWidth = Math.Min(layoutWidth, Math.Max(1, page.Width));
         string key = CacheKey(index, decodeWidth, page.Path);
         if (_failed.Contains(key) || _cache.TryGet(key, out _)) return;
 
@@ -193,14 +241,16 @@ public sealed class WebtoonCanvas : FrameworkElement
 
         double top = _offset;
         double bottom = _offset + Math.Max(1, _viewportHeight > 0 ? _viewportHeight : RenderSize.Height);
-        double width = Math.Max(1, ActualWidth);
+        double canvasWidth = Math.Max(1, ActualWidth);
+        double drawWidth = Math.Max(1, _layout.ViewportWidth);
+        double drawLeft = Math.Max(0, (canvasWidth - drawWidth) / 2);
 
         foreach (int i in _layout.PagesIntersecting(top, bottom))
         {
             double pageTop = _layout.PageTop(i);
             double pageHeight = _layout.PageHeight(i);
-            Rect rect = new(0, pageTop, width, pageHeight);
-            int decodeWidth = Math.Min((int)Math.Ceiling(width), Math.Max(1, _pages[i].Width));
+            Rect rect = new(drawLeft, pageTop, drawWidth, pageHeight);
+            int decodeWidth = Math.Min((int)Math.Ceiling(drawWidth), Math.Max(1, _pages[i].Width));
             string key = CacheKey(i, decodeWidth, _pages[i].Path);
 
             if (_cache.TryGet(key, out var decoded))

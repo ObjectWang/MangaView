@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using ImageMagick;
@@ -14,6 +15,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Magick.NET: WebP 解码", () => TestRasterFormat("webp")),
     ("Magick.NET: Animated WebP", TestAnimatedWebP),
     ("Magick.NET: RAW 预览解码", TestRawDecode),
+    ("WebtoonCanvas: Ctrl 滚轮缩放锚点", TestWebtoonCanvasZoom),
 };
 
 int failed = 0;
@@ -151,6 +153,39 @@ static async Task TestRawDecode()
     var bitmap = (BitmapSource)decoded!;
     AssertTrue(bitmap.PixelWidth is > 0 and <= 1200, "RAW 解码宽度无效");
     AssertTrue(bitmap.PixelHeight > 0, "RAW 解码高度无效");
+}
+
+static Task TestWebtoonCanvasZoom()
+{
+    var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            var canvas = new WebtoonCanvas();
+            canvas.SetViewport(800, 600);
+            canvas.SetPages(new[]
+            {
+                new ImagePage(0, "page_1.jpg", "page_1.jpg", 800, 1200),
+                new ImagePage(1, "page_2.jpg", "page_2.jpg", 800, 1200),
+            });
+            double originalHeight = canvas.TotalHeight;
+            var offsets = canvas.ZoomAt(2.0, new Point(400, 300), 0, 0);
+            AssertTrue(Math.Abs(canvas.ZoomFactor - 2.0) < 0.001, "缩放因子未生效");
+            AssertTrue(canvas.TotalHeight > originalHeight * 1.9, "缩放后总高度未增加");
+            AssertTrue(offsets.HorizontalOffset >= 0 && offsets.VerticalOffset >= 0, "缩放锚点偏移无效");
+            canvas.ResetZoom();
+            AssertTrue(Math.Abs(canvas.ZoomFactor - 1.0) < 0.001, "重置缩放失败");
+            completion.SetResult();
+        }
+        catch (Exception ex)
+        {
+            completion.SetException(ex);
+        }
+    });
+    thread.SetApartmentState(ApartmentState.STA);
+    thread.Start();
+    return completion.Task;
 }
 
 sealed class SkipTestException(string message) : Exception(message);

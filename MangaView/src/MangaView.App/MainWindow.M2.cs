@@ -254,6 +254,7 @@ public partial class MainWindow
         _doubleCoverPage = saved?.DoubleCoverPage ?? _settings.DefaultDoubleCoverPage;
         _doubleGap = saved is { DoubleGap: >= 0 } ? saved.DoubleGap : 12;
         Webtoon.Gap = Math.Max(0, _settings.WebtoonGap);
+        Webtoon.SetZoomFactor(saved?.WebtoonZoom ?? 1.0);
         UpdateDoubleSettingsUi();
 
         if (_mode == ReadingMode.SinglePage && saved is not null)
@@ -330,7 +331,8 @@ public partial class MainWindow
                 _doubleGap,
                 DateTime.UtcNow,
                 SinglePage.Transform.Mode,
-                SinglePage.Transform.Scale);
+                SinglePage.Transform.Scale,
+                _mode == ReadingMode.Webtoon ? Webtoon.ZoomFactor : 1.0);
             _progressStore.Update(progress);
             _progressStore.Save();
         }

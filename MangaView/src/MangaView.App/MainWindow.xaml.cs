@@ -43,6 +43,7 @@ public partial class MainWindow : Window
         SinglePage.ZoomChanged += OnZoomChanged;
         Webtoon.OffsetChangeRequested += OnOffsetRequested;
         Webtoon.CurrentPageChanged += OnWebtoonPageChanged;
+        Webtoon.ZoomChanged += OnWebtoonZoomChanged;
         DoublePage.CurrentPageChanged += OnDoublePageChanged;
         InitializeM2Session();
         InitializeM4Session();
@@ -233,7 +234,7 @@ public partial class MainWindow : Window
         SinglePage.Visibility = _mode == ReadingMode.SinglePage ? Visibility.Visible : Visibility.Collapsed;
         Webtoon.Visibility = _mode == ReadingMode.Webtoon ? Visibility.Visible : Visibility.Collapsed;
         DoublePage.Visibility = _mode == ReadingMode.DoublePage ? Visibility.Visible : Visibility.Collapsed;
-        ScrollHost.HorizontalScrollBarVisibility = _mode == ReadingMode.SinglePage
+        ScrollHost.HorizontalScrollBarVisibility = _mode is ReadingMode.SinglePage or ReadingMode.Webtoon
             ? ScrollBarVisibility.Auto
             : ScrollBarVisibility.Disabled;
         ScrollHost.VerticalScrollBarVisibility = _mode == ReadingMode.DoublePage
@@ -255,7 +256,7 @@ public partial class MainWindow : Window
         ZoomText.Text = _mode switch
         {
             ReadingMode.SinglePage => $"{SinglePage.ZoomPercent:0.##}%",
-            ReadingMode.Webtoon => "适应宽度",
+            ReadingMode.Webtoon => $"{Webtoon.ZoomPercent:0.##}%",
             _ => "适应窗口",
         };
         PreviousButton.IsEnabled = NextButton.IsEnabled = _pages.Count > 1;
@@ -354,10 +355,12 @@ public partial class MainWindow : Window
     private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
-        if (_mode == ReadingMode.SinglePage && ctrl)
+        if (ctrl && (_mode == ReadingMode.SinglePage || _mode == ReadingMode.Webtoon))
         {
             double factor = Math.Pow(1.2, e.Delta / 120.0);
-            ZoomAt(factor, e.GetPosition(ScrollHost));
+            Point position = e.GetPosition(ScrollHost);
+            if (_mode == ReadingMode.SinglePage) ZoomAt(factor, position);
+            else ZoomWebtoonAt(factor, position);
             e.Handled = true;
             return;
         }
@@ -393,12 +396,22 @@ public partial class MainWindow : Window
 
     private void OnZoomInClick(object sender, RoutedEventArgs e)
     {
+        if (_mode == ReadingMode.Webtoon)
+        {
+            ZoomWebtoonAt(1.25, new Point(ScrollHost.ViewportWidth / 2, ScrollHost.ViewportHeight / 2));
+            return;
+        }
         EnsureSingleMode();
         ZoomAt(1.25, new Point(ScrollHost.ViewportWidth / 2, ScrollHost.ViewportHeight / 2));
     }
 
     private void OnZoomOutClick(object sender, RoutedEventArgs e)
     {
+        if (_mode == ReadingMode.Webtoon)
+        {
+            ZoomWebtoonAt(1 / 1.25, new Point(ScrollHost.ViewportWidth / 2, ScrollHost.ViewportHeight / 2));
+            return;
+        }
         EnsureSingleMode();
         ZoomAt(1 / 1.25, new Point(ScrollHost.ViewportWidth / 2, ScrollHost.ViewportHeight / 2));
     }
@@ -431,6 +444,16 @@ public partial class MainWindow : Window
         ScrollHost.ScrollToVerticalOffset(Math.Max(0, vertical));
     }
 
+    private void ZoomWebtoonAt(double factor, Point anchor)
+    {
+        if (_mode != ReadingMode.Webtoon || _pages.Count == 0) return;
+        var offsets = Webtoon.ZoomAt(factor, anchor, ScrollHost.HorizontalOffset, ScrollHost.VerticalOffset);
+        ScrollHost.UpdateLayout();
+        ScrollHost.ScrollToHorizontalOffset(offsets.HorizontalOffset);
+        ScrollHost.ScrollToVerticalOffset(offsets.VerticalOffset);
+        Webtoon.OnViewScrolled(ScrollHost.VerticalOffset, ScrollHost.ViewportHeight);
+    }
+
     private void OnFitWindowClick(object sender, RoutedEventArgs e) => SetSingleZoom(ZoomMode.FitWindow);
 
     private void OnFitWidthClick(object sender, RoutedEventArgs e) => SetSingleZoom(ZoomMode.FitWidth);
@@ -441,6 +464,13 @@ public partial class MainWindow : Window
 
     private void SetSingleZoom(ZoomMode mode)
     {
+        if (_mode == ReadingMode.Webtoon && mode == ZoomMode.FitWidth)
+        {
+            var anchor = Webtoon.CurrentAnchor;
+            Webtoon.ResetZoom();
+            Dispatcher.BeginInvoke(() => JumpWebtoonToAnchor(anchor), DispatcherPriority.Loaded);
+            return;
+        }
         EnsureSingleMode();
         SinglePage.SetZoomMode(mode);
         ScrollHost.UpdateLayout();
@@ -450,6 +480,12 @@ public partial class MainWindow : Window
     private void OnZoomChanged(double percent)
     {
         if (_mode == ReadingMode.SinglePage)
+            ZoomText.Text = $"{percent:0.##}%";
+    }
+
+    private void OnWebtoonZoomChanged(double percent)
+    {
+        if (_mode == ReadingMode.Webtoon)
             ZoomText.Text = $"{percent:0.##}%";
     }
 
@@ -463,7 +499,9 @@ public partial class MainWindow : Window
 
     private void OnViewerMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (_mode != ReadingMode.SinglePage || e.ChangedButton != MouseButton.Left ||
+        bool canPan = _mode == ReadingMode.SinglePage ||
+                      (_mode == ReadingMode.Webtoon && Webtoon.ZoomFactor > 1.0);
+        if (!canPan || e.ChangedButton != MouseButton.Left ||
             IsInsideScrollBar(e.OriginalSource as DependencyObject))
             return;
 
@@ -705,6 +743,27 @@ public partial class MainWindow : Window
     private void HandleWebtoonKey(KeyEventArgs e, bool ctrl, bool shift)
     {
         _webtoonAnchorDirty = true;
+        if (ctrl)
+        {
+            switch (e.Key)
+            {
+                case Key.Add:
+                case Key.OemPlus:
+                    OnZoomInClick(this, new RoutedEventArgs());
+                    e.Handled = true;
+                    return;
+                case Key.Subtract:
+                case Key.OemMinus:
+                    OnZoomOutClick(this, new RoutedEventArgs());
+                    e.Handled = true;
+                    return;
+                case Key.D0:
+                case Key.NumPad0:
+                    OnFitWidthClick(this, new RoutedEventArgs());
+                    e.Handled = true;
+                    return;
+            }
+        }
         double viewport = ScrollHost.ViewportHeight;
         switch (e.Key)
         {

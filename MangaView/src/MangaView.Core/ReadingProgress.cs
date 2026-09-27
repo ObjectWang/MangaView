@@ -14,7 +14,8 @@ public sealed record ReadingProgress(
     double DoubleGap,
     DateTime UpdatedUtc,
     ZoomMode ZoomMode = ZoomMode.FitWindow,
-    double ZoomScale = 1.0);
+    double ZoomScale = 1.0,
+    double WebtoonZoom = 1.0);
 
 public sealed class ReadingProgressStore
 {
