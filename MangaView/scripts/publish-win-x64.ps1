@@ -27,5 +27,12 @@ if (Test-Path -LiteralPath $outputPath) {
 
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+foreach ($document in @('README-V1.md', 'README-M4.md', 'THIRD-PARTY-NOTICES.md')) {
+    $source = Join-Path $root $document
+    if (Test-Path -LiteralPath $source) {
+        Copy-Item -LiteralPath $source -Destination (Join-Path $outputPath $document) -Force
+    }
+}
+
 Write-Host "Published to $outputPath"
 Write-Host "Executable: $(Join-Path $outputPath 'MangaView.exe')"
