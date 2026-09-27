@@ -5,7 +5,13 @@ public static class ImageCatalog
 {
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
+        // MVP raster formats
         ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".avif",
+        // M3 / V1.x format expansion
+        ".heic", ".heif", ".psd", ".psb", ".jxl", ".qoi", ".svg", ".ico", ".exr",
+        // Common RAW containers/previews
+        ".dng", ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".srf", ".sr2", ".orf",
+        ".raf", ".rw2", ".pef", ".srw", ".raw",
     };
 
     public static bool IsSupportedImage(string path) =>

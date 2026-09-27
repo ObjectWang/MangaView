@@ -1,5 +1,7 @@
 using System.IO;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using ImageMagick;
 
 namespace MangaView.App;
 
@@ -38,25 +40,68 @@ public sealed class AnimatedImageSource : IDisposable
 
     public static AnimatedImageSource? TryLoad(string path, CancellationToken cancellationToken)
     {
-        if (!string.Equals(Path.GetExtension(path), ".gif", StringComparison.OrdinalIgnoreCase))
+        string extension = Path.GetExtension(path);
+        if (!extension.Equals(".gif", StringComparison.OrdinalIgnoreCase) &&
+            !extension.Equals(".webp", StringComparison.OrdinalIgnoreCase) &&
+            !extension.Equals(".avif", StringComparison.OrdinalIgnoreCase) &&
+            !extension.Equals(".png", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-            bufferSize: 81920, FileOptions.SequentialScan);
-        var decoder = new GifBitmapDecoder(stream,
-            BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.IgnoreImageCache,
-            BitmapCacheOption.OnLoad);
-        if (decoder.Frames.Count <= 1) return null;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 81920, FileOptions.SequentialScan);
+            BitmapDecoder decoder = BitmapDecoder.Create(stream,
+                BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.IgnoreImageCache,
+                BitmapCacheOption.OnLoad);
+            if (decoder.Frames.Count > 1)
+            {
+                var frames = new List<BitmapSource>(decoder.Frames.Count);
+                var delays = new List<TimeSpan>(decoder.Frames.Count);
+                foreach (var sourceFrame in decoder.Frames)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    BitmapSource frame = sourceFrame;
+                    if (frame.CanFreeze) frame.Freeze();
+                    frames.Add(frame);
+                    delays.Add(ReadDelay(sourceFrame));
+                }
+                return new AnimatedImageSource(frames.ToArray(), delays.ToArray());
+            }
+        }
+        catch when (!cancellationToken.IsCancellationRequested)
+        {
+            // 回退到 Magick.NET，支持 WIC 缺失的 WebP/AVIF 动画。
+        }
 
-        var frames = new List<BitmapSource>(decoder.Frames.Count);
-        var delays = new List<TimeSpan>(decoder.Frames.Count);
-        foreach (var sourceFrame in decoder.Frames)
+        return TryLoadMagick(path, cancellationToken);
+    }
+
+    private static AnimatedImageSource? TryLoadMagick(string path, CancellationToken cancellationToken)
+    {
+        using var collection = new MagickImageCollection(path);
+        if (collection.Count <= 1) return null;
+
+        var frames = new List<BitmapSource>(collection.Count);
+        var delays = new List<TimeSpan>(collection.Count);
+        foreach (var image in collection)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            BitmapSource frame = sourceFrame;
-            if (frame.CanFreeze) frame.Freeze();
-            frames.Add(frame);
-            delays.Add(ReadDelay(sourceFrame));
+            image.AutoOrient();
+            if (image.ColorSpace != ColorSpace.sRGB) image.ColorSpace = ColorSpace.sRGB;
+            if (!image.HasAlpha) image.Alpha(AlphaOption.Opaque);
+
+            int width = checked((int)image.Width);
+            int height = checked((int)image.Height);
+            byte[] pixels = image.GetPixels().ToByteArray(PixelMapping.BGRA)
+                ?? throw new InvalidOperationException("无法读取动画帧像素。");
+            var bitmap = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32,
+                null, pixels, checked(width * 4));
+            bitmap.Freeze();
+            frames.Add(bitmap);
+            delays.Add(image.AnimationDelay > 0
+                ? TimeSpan.FromMilliseconds(Math.Clamp(image.AnimationDelay * 10, 20, 10000))
+                : TimeSpan.FromMilliseconds(100));
         }
         return new AnimatedImageSource(frames.ToArray(), delays.ToArray());
     }

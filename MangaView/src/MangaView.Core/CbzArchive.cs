@@ -24,9 +24,6 @@ public sealed record CbzExtractionOptions(
 /// </summary>
 public static class CbzArchive
 {
-    private static readonly string[] ImageExtensions =
-        { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".avif" };
-
     public static bool IsSupported(string path) =>
         string.Equals(Path.GetExtension(path), ".cbz", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase);
@@ -68,7 +65,7 @@ public static class CbzArchive
             int index = 0;
             var imageEntries = zip.Entries
                 .Where(e => !e.FullName.EndsWith('/') && !e.FullName.EndsWith('\\'))
-                .Where(e => ImageExtensions.Contains(Path.GetExtension(e.FullName).ToLowerInvariant()))
+                .Where(e => ImageCatalog.IsSupportedImage(e.FullName))
                 .OrderBy(e => Path.GetFileName(e.FullName.Replace('\\', '/')), NaturalSortComparer.Instance)
                 .ToList();
             foreach (var entry in imageEntries)
@@ -147,7 +144,7 @@ public static class CbzArchive
 
     private static IReadOnlyList<string> EnumerateImages(string directory) =>
         Directory.EnumerateFiles(directory)
-            .Where(f => ImageExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .Where(ImageCatalog.IsSupportedImage)
             .OrderBy(f => f, NaturalSortComparer.Instance)
             .ToList();
 }

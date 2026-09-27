@@ -108,5 +108,6 @@ D:\WorkSpace\Codex\MangaView\MangaView\tests\MangaView.Core.Tests\bin\Release\ne
 ## 暂不包含
 
 - `.rar` / `.cbr` / `.7z` 属于 V1.x。
-- Animated WebP / AVIF 属于 V1.x。
 - 自动跨页识别与自动阅读顺序判断属于 V2.x。
+
+> Animated WebP / AVIF、HEIC、PSD、RAW 等格式增强已在 M3 完成，见 `README-M3.md`。
