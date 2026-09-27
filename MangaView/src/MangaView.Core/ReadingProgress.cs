@@ -118,6 +118,7 @@ public sealed record AppSettings(
     bool ShowInfoPanel = false,
     bool ShowThumbnails = false,
     int SlideshowIntervalSeconds = 5,
+    int WebtoonSlideshowSpeed = 40,
     bool SlideshowRandom = false,
     bool SlideshowLoop = true,
     bool SlideshowHideControls = false,

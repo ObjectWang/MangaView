@@ -510,6 +510,7 @@ static async Task TestM4SettingsStore()
             ShowInfoPanel = true,
             ShowThumbnails = true,
             SlideshowIntervalSeconds = 12,
+            WebtoonSlideshowSpeed = 160,
             SlideshowRandom = true,
             SlideshowLoop = false,
             SlideshowHideControls = true,
@@ -524,6 +525,7 @@ static async Task TestM4SettingsStore()
         AssertTrue(!loaded.Settings.SaveRecent, "最近记录开关");
         AssertTrue(loaded.Settings.ShowInfoPanel && loaded.Settings.ShowThumbnails, "面板开关");
         AssertEqual(12, loaded.Settings.SlideshowIntervalSeconds, "幻灯片间隔");
+        AssertEqual(160, loaded.Settings.WebtoonSlideshowSpeed, "Webtoon 幻灯片速度");
         AssertTrue(loaded.Settings.SlideshowRandom, "随机播放");
         AssertTrue(!loaded.Settings.SlideshowLoop, "循环播放");
         AssertEqual(@"\\.\DISPLAY2", loaded.Settings.WindowPlacement?.MonitorDeviceName, "显示器");

@@ -25,6 +25,9 @@ public partial class MainWindow
     private bool _infoPanelVisible;
     private bool _thumbnailVisible;
     private bool _controlsHidden;
+    private int _slideshowIntervalSeconds = 5;
+    private int _webtoonSlideshowSpeed = 40;
+    private DateTime _lastSlideshowTick;
 
     private static string GetM4Path(string fileName) => Path.Combine(GetLocalDataRoot(), fileName);
 
@@ -36,8 +39,10 @@ public partial class MainWindow
         _darkTheme = ResolveDarkTheme(_themePreference);
         _infoPanelVisible = _settings.ShowInfoPanel;
         _thumbnailVisible = _settings.ShowThumbnails;
+        _slideshowIntervalSeconds = Math.Clamp(_settings.SlideshowIntervalSeconds, 1, 30);
+        _webtoonSlideshowSpeed = Math.Clamp(_settings.WebtoonSlideshowSpeed, 5, 1000);
 
-        _slideshowTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(_settings.SlideshowIntervalSeconds, 1, 30));
+        _slideshowTimer.Interval = TimeSpan.FromSeconds(_slideshowIntervalSeconds);
         _slideshowTimer.Tick += OnSlideshowTick;
         _slideshowHideTimer.Tick += (_, _) =>
         {
@@ -95,7 +100,8 @@ public partial class MainWindow
             RememberProgress = _settings.RememberProgress,
             ShowInfoPanel = _infoPanelVisible,
             ShowThumbnails = _thumbnailVisible,
-            SlideshowIntervalSeconds = (int)Math.Clamp(_slideshowTimer.Interval.TotalSeconds, 1, 30),
+            SlideshowIntervalSeconds = _slideshowIntervalSeconds,
+            WebtoonSlideshowSpeed = _webtoonSlideshowSpeed,
             SlideshowRandom = SlideshowRandomMenuItem.IsChecked,
             SlideshowLoop = SlideshowLoopMenuItem.IsChecked,
             SlideshowHideControls = SlideshowHideControlsMenuItem.IsChecked,
@@ -329,7 +335,28 @@ public partial class MainWindow
 
     private void SetSlideshowInterval(int seconds)
     {
-        _slideshowTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 30));
+        _slideshowIntervalSeconds = Math.Clamp(seconds, 1, 30);
+        ConfigureSlideshowTimerForMode();
+        SaveM4Settings();
+    }
+
+    private void OnSlideshowSpeedClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string value } && int.TryParse(value, out int speed))
+            SetSlideshowSpeed(speed);
+    }
+
+    private void OnSlideshowCustomSpeedClick(object sender, RoutedEventArgs e)
+    {
+        string? value = TextPromptDialog.Show(this, "Webtoon 幻灯片速度", "像素/秒（5–1000）：",
+            _webtoonSlideshowSpeed.ToString());
+        if (int.TryParse(value, out int speed)) SetSlideshowSpeed(speed);
+    }
+
+    private void SetSlideshowSpeed(int pixelsPerSecond)
+    {
+        _webtoonSlideshowSpeed = Math.Clamp(pixelsPerSecond, 5, 1000);
+        RefreshSlideshowMenuChecks();
         SaveM4Settings();
     }
 
@@ -355,11 +382,12 @@ public partial class MainWindow
     private void StartSlideshow()
     {
         if (_pages.Count == 0) return;
-        SetMode(ReadingMode.SinglePage);
         _slideshowActive = true;
         _slideshowPaused = false;
         _slideshowVisited.Clear();
         _slideshowVisited.Add(_currentPageIndex);
+        ConfigureSlideshowTimerForMode();
+        _lastSlideshowTick = DateTime.UtcNow;
         _slideshowTimer.Start();
         SlideshowToggleMenuItem.Header = "暂停";
         if (_settings.SlideshowHideControls)
@@ -373,7 +401,12 @@ public partial class MainWindow
         if (!_slideshowActive) return;
         _slideshowPaused = !_slideshowPaused;
         if (_slideshowPaused) _slideshowTimer.Stop();
-        else _slideshowTimer.Start();
+        else
+        {
+            ConfigureSlideshowTimerForMode();
+            _lastSlideshowTick = DateTime.UtcNow;
+            _slideshowTimer.Start();
+        }
         SlideshowToggleMenuItem.Header = _slideshowPaused ? "继续" : "暂停";
         SetM4ChromeVisible(true);
         if (!_slideshowPaused && _settings.SlideshowHideControls)
@@ -396,10 +429,52 @@ public partial class MainWindow
     private void OnSlideshowTick(object? sender, EventArgs e)
     {
         if (_pages.Count == 0) { StopSlideshow(); return; }
+        if (_mode == ReadingMode.Webtoon)
+        {
+            AdvanceWebtoonSlideshow();
+            return;
+        }
         int next = ChooseSlideshowPage();
         if (next < 0) { StopSlideshow(); return; }
         _slideshowVisited.Add(next);
         GoToPage(next);
+    }
+
+    private void AdvanceWebtoonSlideshow()
+    {
+        DateTime now = DateTime.UtcNow;
+        double elapsed = Math.Clamp((now - _lastSlideshowTick).TotalSeconds, 0.001, 0.25);
+        _lastSlideshowTick = now;
+        double maximum = Math.Max(0, ScrollHost.ExtentHeight - ScrollHost.ViewportHeight);
+        double next = ScrollHost.VerticalOffset + _webtoonSlideshowSpeed * elapsed;
+        if (next < maximum - 0.5)
+        {
+            ScrollHost.ScrollToVerticalOffset(next);
+            return;
+        }
+
+        if (SlideshowLoopMenuItem.IsChecked)
+        {
+            ScrollHost.ScrollToVerticalOffset(0);
+        }
+        else
+        {
+            ScrollHost.ScrollToVerticalOffset(maximum);
+            StopSlideshow();
+        }
+    }
+
+    private void ConfigureSlideshowTimerForMode()
+    {
+        if (_mode == ReadingMode.Webtoon)
+        {
+            _slideshowTimer.Interval = TimeSpan.FromMilliseconds(16);
+            _lastSlideshowTick = DateTime.UtcNow;
+        }
+        else
+        {
+            _slideshowTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(_slideshowIntervalSeconds, 1, 30));
+        }
     }
 
     private int ChooseSlideshowPage()
@@ -426,6 +501,7 @@ public partial class MainWindow
         SlideshowRandomMenuItem.IsChecked = _settings.SlideshowRandom;
         SlideshowLoopMenuItem.IsChecked = _settings.SlideshowLoop;
         SlideshowHideControlsMenuItem.IsChecked = _settings.SlideshowHideControls;
+        SlideshowSpeedMenuItem.Header = $"Webtoon 滚动速度：{_webtoonSlideshowSpeed} px/秒";
     }
 
     private void SetM4ChromeVisible(bool visible)

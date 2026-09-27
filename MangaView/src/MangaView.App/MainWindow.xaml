@@ -127,6 +127,15 @@
                     <Separator/>
                     <MenuItem Header="自定义…" Click="OnSlideshowCustomIntervalClick"/>
                 </MenuItem>
+                <MenuItem x:Name="SlideshowSpeedMenuItem" Header="Webtoon 滚动速度(_V)">
+                    <MenuItem Header="慢速：20 px/秒" Tag="20" Click="OnSlideshowSpeedClick"/>
+                    <MenuItem Header="标准：40 px/秒" Tag="40" Click="OnSlideshowSpeedClick"/>
+                    <MenuItem Header="快速：80 px/秒" Tag="80" Click="OnSlideshowSpeedClick"/>
+                    <MenuItem Header="极快：160 px/秒" Tag="160" Click="OnSlideshowSpeedClick"/>
+                    <MenuItem Header="更快：320 px/秒" Tag="320" Click="OnSlideshowSpeedClick"/>
+                    <Separator/>
+                    <MenuItem Header="自定义…" Click="OnSlideshowCustomSpeedClick"/>
+                </MenuItem>
                 <MenuItem x:Name="SlideshowRandomMenuItem" Header="随机播放" IsCheckable="True"
                           Click="OnSlideshowRandomClick"/>
                 <MenuItem x:Name="SlideshowLoopMenuItem" Header="循环播放" IsCheckable="True"

@@ -224,6 +224,7 @@ public partial class MainWindow : Window
             DoublePage.GoToPage(page);
         }
 
+        if (_slideshowActive) ConfigureSlideshowTimerForMode();
         UpdateModeUi();
         UpdateProgressBar();
         ScheduleProgressSave();

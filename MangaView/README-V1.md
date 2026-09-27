@@ -1,6 +1,6 @@
 # MangaView V1.0 Release Preparation
 
-- Version: 1.0.1
+- Version: 1.0.2
 - Platform: Windows 10 / 11 x64
 - Runtime: .NET 10 self-contained publish
 - UI: WPF
@@ -16,6 +16,7 @@
 - Multi-monitor window placement, monitor DPI / ICC profile reporting and Windows HDR / advanced-color status detection.
 - JPG, PNG, GIF, WebP, BMP, TIFF, AVIF, HEIC/HEIF, PSD/PSB, common RAW containers, JXL, QOI, SVG, ICO and EXR decode routes.
 - Webtoon mode supports Ctrl+wheel zoom anchored at the mouse position, horizontal scrolling and per-book zoom restore.
+- Slideshow follows the current reading mode: page interval in single/double mode and configurable continuous scroll speed in Webtoon mode.
 
 ## Publish
 
