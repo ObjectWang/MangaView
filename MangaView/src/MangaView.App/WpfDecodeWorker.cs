@@ -14,6 +14,9 @@ public sealed class WpfDecodeWorker : IDecodeWorker
     {
         return Task.Run(() =>
         {
+            AnimatedImageSource? animated = AnimatedImageSource.TryLoad(request.Path, cancellationToken);
+            if (animated is not null) return (object?)animated;
+
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;

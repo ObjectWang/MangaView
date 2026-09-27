@@ -5,13 +5,21 @@ using MangaView.Core;
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("NaturalSort: 数值段按数值排序", TestNaturalSort),
+    ("ImageTransformState: 适应/旋转/缩放边界", TestImageTransformState),
+    ("ImageCatalog: 自然排序与递归枚举", TestImageCatalog),
     ("WebtoonLayout: 布局与二分查找", TestLayout),
     ("WebtoonLayout: 滚动锚点往返", TestAnchorRoundTrip),
     ("LruCache: 预算淘汰与访问刷新", TestLruCache),
     ("DecodeScheduler: 优先级排序", TestSchedulerPriority),
     ("DecodeScheduler: 同 Key 去重与优先级升级", TestSchedulerDedupAndUpgrade),
+    ("DecodeScheduler: 取消过期排队任务", TestSchedulerCancelQueued),
     ("虚拟化模拟: 500 页滚动仅保持小常驻集", TestVirtualScrollSimulation),
     ("虚拟化模拟: 跳转页 300 只解码附近页", TestJumpVirtualization),
+    ("DoublePageLayout: 封面页与阅读方向", TestDoublePageLayout),
+    ("ReadingProgressStore: JSON 保存/恢复", TestProgressStore),
+    ("ReadingProgressStore: 损坏 JSON 容错", TestProgressStoreCorruptJson),
+    ("CbzArchive: 自然排序与安全缓存", TestCbzArchive),
+    ("CbzArchive: 损坏压缩包报错", TestCbzInvalidArchive),
 };
 
 int failed = 0;
@@ -56,6 +64,62 @@ static async Task TestNaturalSort()
     };
     for (int i = 0; i < expected.Length; i++)
         AssertEqual(expected[i], names[i], $"自然排序[{i}]");
+}
+
+static async Task TestImageTransformState()
+{
+    var transform = new ImageTransformState();
+    var (width, height) = transform.GetDisplaySize(2000, 1000, 1000, 700);
+    AssertEqual(1000.0, width, "适应窗口宽度");
+    AssertEqual(500.0, height, "适应窗口高度");
+    AssertEqual(0.5, transform.Scale, "适应窗口比例");
+
+    // 旋转 90° 后使用旋转后的宽高重新适配。
+    transform.RotateRight();
+    (width, height) = transform.GetDisplaySize(2000, 1000, 1000, 700);
+    AssertEqual(350.0, width, "旋转后适应宽度");
+    AssertEqual(700.0, height, "旋转后适应高度");
+    AssertEqual(90, transform.RotationDegrees, "旋转角度");
+
+    transform.ZoomBy(1000);
+    AssertEqual(ImageTransformState.MaxScale, transform.Scale, "最大缩放钳制");
+    transform.ZoomBy(0.000001);
+    AssertEqual(ImageTransformState.MinScale, transform.Scale, "最小缩放钳制");
+    AssertEqual(ZoomMode.Custom, transform.Mode, "手动缩放模式");
+
+    transform.ToggleHorizontalFlip();
+    transform.ToggleVerticalFlip();
+    AssertTrue(transform.FlipHorizontal && transform.FlipVertical, "翻转状态");
+    transform.Reset();
+    AssertEqual(0, transform.RotationDegrees, "重置旋转");
+    AssertEqual(ZoomMode.FitWindow, transform.Mode, "重置缩放模式");
+}
+
+static async Task TestImageCatalog()
+{
+    string root = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string nested = Path.Combine(root, "nested");
+    try
+    {
+        Directory.CreateDirectory(nested);
+        foreach (string name in new[] { "page_10.jpg", "page_2.png", "page_1.webp", "ignore.txt" })
+            File.WriteAllText(Path.Combine(root, name), name);
+        File.WriteAllText(Path.Combine(nested, "page_3.jpg"), "nested");
+
+        var current = ImageCatalog.EnumerateImages(root, recursive: false);
+        CollectionAssert(new[] { "page_1.webp", "page_2.png", "page_10.jpg" },
+            current.Select(Path.GetFileName).ToArray(), "当前目录自然排序");
+
+        var recursive = ImageCatalog.EnumerateImages(root, recursive: true);
+        AssertEqual(4, recursive.Count, "递归图片数量");
+        int nestedIndex = ImageCatalog.IndexOfPath(recursive, Path.Combine(nested, "page_3.jpg"));
+        AssertTrue(nestedIndex >= 0, "定位初始图片");
+        AssertEqual("page_3.jpg", Path.GetFileName(recursive[nestedIndex]), "定位初始图片名称");
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+    }
 }
 
 static async Task TestLayout()
@@ -126,6 +190,15 @@ static async Task TestLruCache()
 
     cache.Put("d", "D", 200); // 单项超预算
     AssertEqual(2, cache.Count, "单项超预算不缓存");
+
+    evicted.Clear();
+    cache.Put("a", "A2", 40); // 同 Key 替换也应通知旧值
+    CollectionAssert(new[] { "A" }, evicted.ToArray(), "替换事件");
+
+    evicted.Clear();
+    cache.Clear();
+    AssertEqual(0, cache.Count, "清空后的数量");
+    CollectionAssert(new[] { "A2", "C" }, evicted.OrderBy(x => x).ToArray(), "清空事件");
 }
 
 static async Task TestSchedulerPriority()
@@ -176,6 +249,26 @@ static async Task TestSchedulerDedupAndUpgrade()
 
     await worker.CompleteAsync("k2");
     await worker.CompleteAsync("k3");
+}
+
+static async Task TestSchedulerCancelQueued()
+{
+    var worker = new ManualWorker();
+    using var scheduler = new DecodeScheduler(worker, maxConcurrent: 1);
+
+    var running = scheduler.RequestAsync(new DecodeRequest("p0", 0, "p0.jpg", 800, DecodePriority.Viewport));
+    await worker.WaitStartedAsync(1);
+    var queued1 = scheduler.RequestAsync(new DecodeRequest("p1", 1, "p1.jpg", 800, DecodePriority.Preload));
+    var queued2 = scheduler.RequestAsync(new DecodeRequest("p2", 2, "p2.jpg", 800, DecodePriority.Preload));
+
+    AssertEqual(2, scheduler.QueuedCount, "排队数量");
+    AssertEqual(2, scheduler.CancelQueued(), "取消数量");
+    AssertTrue(queued1.IsCanceled && queued2.IsCanceled, "过期任务应被取消");
+    AssertEqual(0, scheduler.QueuedCount, "取消后的排队数量");
+
+    await worker.CompleteAsync("p0");
+    await running;
+    AssertEqual(0, scheduler.InFlightCount, "在途任务完成后清空");
 }
 
 static async Task TestVirtualScrollSimulation()
@@ -262,6 +355,164 @@ static void CollectionAssert<T>(T[] expected, T[] actual, string ctx)
         throw new Exception($"{ctx} expected=[{string.Join(",", expected)}] actual=[{string.Join(",", actual)}]");
 }
 
+static async Task TestDoublePageLayout()
+{
+    var pages = Enumerable.Range(0, 5)
+        .Select(i => new ImagePage(i, $"p{i}.jpg", $"page_{i}.jpg", 800, 1200))
+        .ToList();
+
+    // 独立封面 + 左到右：封面单独，之后 1/2、3/4 配对
+    var ltr = new DoublePageLayout(pages, coverPage: true, ReadingDirection.LeftToRight);
+    AssertEqual(3, ltr.SpreadCount, "LTR 跨页数");
+    AssertEqual(0, ltr.Spreads[0].LeftPageIndex, "LTR 封面页");
+    AssertEqual(-1, ltr.Spreads[0].RightPageIndex, "LTR 封面右侧空");
+    AssertEqual(1, ltr.Spreads[1].LeftPageIndex, "LTR 第二跨左页");
+    AssertEqual(2, ltr.Spreads[1].RightPageIndex, "LTR 第二跨右页");
+    AssertEqual(3, ltr.Spreads[2].LeftPageIndex, "LTR 第三跨左页");
+    AssertEqual(4, ltr.Spreads[2].RightPageIndex, "LTR 第三跨右页");
+
+    // 右到左：左右位置交换，阅读顺序 2 -> 1
+    var rtl = new DoublePageLayout(pages, coverPage: true, ReadingDirection.RightToLeft);
+    AssertEqual(2, rtl.Spreads[1].LeftPageIndex, "RTL 第二跨左页");
+    AssertEqual(1, rtl.Spreads[1].RightPageIndex, "RTL 第二跨右页");
+    CollectionAssert(new[] { 1, 2 }, rtl.Spreads[1].ReadingOrder(ReadingDirection.RightToLeft).ToArray(), "RTL 阅读顺序");
+
+    // 无封面：0/1、2/3、4 单页
+    var noCover = new DoublePageLayout(pages, coverPage: false, ReadingDirection.LeftToRight);
+    AssertEqual(3, noCover.SpreadCount, "无封面跨页数");
+    AssertEqual(0, noCover.Spreads[0].LeftPageIndex, "无封面第一跨左页");
+    AssertEqual(1, noCover.Spreads[0].RightPageIndex, "无封面第一跨右页");
+    AssertEqual(4, noCover.Spreads[2].LeftPageIndex, "末尾单页");
+
+    // 页码 -> 跨页查找（进度恢复/跳页）
+    AssertEqual(1, ltr.SpreadIndexForPage(2), "页 3 所在跨页");
+    AssertEqual(0, ltr.SpreadIndexForPage(0), "封面所在跨页");
+}
+
+static async Task TestProgressStore()
+{
+    string dir = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string file = Path.Combine(dir, "progress.json");
+    try
+    {
+        var store = new ReadingProgressStore(file);
+        var progress = new ReadingProgress(
+            SourceKey: @"D:\books\demo.cbz",
+            Mode: ReadingMode.DoublePage,
+            PageIndex: 123,
+            Anchor: new ScrollAnchor(45, 678.5),
+            Direction: ReadingDirection.RightToLeft,
+            DoubleCoverPage: true,
+            DoubleGap: 12,
+            UpdatedUtc: DateTime.UtcNow,
+            ZoomMode: ZoomMode.FitWidth,
+            ZoomScale: 2.5);
+        store.Update(progress);
+        store.Save();
+
+        var restored = new ReadingProgressStore(file);
+        var actual = restored.Get(@"D:\books\demo.cbz");
+        AssertTrue(actual is not null, "进度应能恢复");
+        AssertEqual(ReadingMode.DoublePage, actual!.Mode, "模式");
+        AssertEqual(123, actual.PageIndex, "页码");
+        AssertEqual(45, actual.Anchor.PageIndex, "锚点页");
+        AssertEqual(678.5, actual.Anchor.InPageOffset, "页内偏移");
+        AssertEqual(ReadingDirection.RightToLeft, actual.Direction, "阅读方向");
+        AssertTrue(actual.DoubleCoverPage, "封面页设置");
+        AssertEqual(12.0, actual.DoubleGap, "双页间距");
+        AssertEqual(ZoomMode.FitWidth, actual.ZoomMode, "缩放模式");
+        AssertEqual(2.5, actual.ZoomScale, "缩放比例");
+    }
+    finally
+    {
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+}
+
+static async Task TestProgressStoreCorruptJson()
+{
+    string dir = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string file = Path.Combine(dir, "progress.json");
+    try
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(file, "{ not valid json");
+        var store = new ReadingProgressStore(file);
+        AssertTrue(store.Get(@"D:\books\demo.cbz") is null, "损坏进度应回退为空");
+    }
+    finally
+    {
+        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+}
+
+static async Task TestCbzArchive()
+{
+    string root = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string archive = Path.Combine(root, "demo.cbz");
+    string cache = Path.Combine(root, "cache");
+    try
+    {
+        Directory.CreateDirectory(root);
+        using (var zip = System.IO.Compression.ZipFile.Open(archive, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            // 故意乱序 + 混入非图片 + 路径穿越样式名（实现应扁平化，不允许写出缓存目录）
+            foreach (var (name, value) in new[] { ("page_2.jpg", 2), ("ignore.txt", 0), ("page_1.jpg", 1), ("page_10.jpg", 10) })
+            {
+                var entry = zip.CreateEntry(name);
+                using var stream = entry.Open();
+                stream.WriteByte((byte)value);
+            }
+        }
+
+        var result = CbzArchive.ExtractAsync(archive, cache).GetAwaiter().GetResult();
+        AssertEqual(3, result.Files.Count, "只提取图片");
+        AssertEqual(3, result.Files.Count, "图片数量");
+        var names = result.Files.Select(Path.GetFileName).ToList();
+        CollectionAssert(
+            new[] { "000001_page_1.jpg", "000002_page_2.jpg", "000003_page_10.jpg" },
+            names.ToArray(), "自然排序文件名");
+
+        // 缓存目录必须全部位于 cache 下，无路径穿越
+        string fullCache = Path.GetFullPath(cache);
+        AssertTrue(result.Files.All(f =>
+            Path.GetFullPath(f).StartsWith(fullCache, StringComparison.OrdinalIgnoreCase)), "无路径穿越");
+
+        // 重复打开应复用缓存
+        var result2 = CbzArchive.ExtractAsync(archive, cache).GetAwaiter().GetResult();
+        AssertEqual(result.Directory, result2.Directory, "缓存复用");
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+    }
+}
+
+static async Task TestCbzInvalidArchive()
+{
+    string root = Path.Combine(Path.GetTempPath(), "mangaview-tests", Guid.NewGuid().ToString("N"));
+    string archive = Path.Combine(root, "broken.cbz");
+    string cache = Path.Combine(root, "cache");
+    try
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllText(archive, "this is not a zip archive");
+        bool failed = false;
+        try
+        {
+            await CbzArchive.ExtractAsync(archive, cache);
+        }
+        catch (InvalidDataException)
+        {
+            failed = true;
+        }
+        AssertTrue(failed, "损坏压缩包应抛出 InvalidDataException");
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+    }
+}
 sealed class ManualWorker : IDecodeWorker
 {
     private readonly object _gate = new();
@@ -315,5 +566,3 @@ sealed class CountingWorker : IDecodeWorker
         return Task.FromResult<object?>(new object());
     }
 }
-
-

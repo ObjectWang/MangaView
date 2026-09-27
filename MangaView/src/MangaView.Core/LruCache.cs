@@ -59,6 +59,7 @@ public sealed class LruCache<T> where T : class
                 _used -= node.Value.Size;
                 _order.Remove(node);
                 _map.Remove(key);
+                (evicted ??= new()).Add((node.Value.Key, node.Value.Value, node.Value.Size));
             }
             var newNode = _order.AddFirst(new Entry(key, value, sizeBytes));
             _map[key] = newNode;
@@ -79,11 +80,16 @@ public sealed class LruCache<T> where T : class
 
     public void Clear()
     {
+        List<(string Key, T Value, long Size)> cleared = new();
         lock (_gate)
         {
+            foreach (var entry in _order)
+                cleared.Add((entry.Key, entry.Value, entry.Size));
             _order.Clear();
             _map.Clear();
             _used = 0;
         }
+        foreach (var entry in cleared)
+            ItemEvicted?.Invoke(entry.Key, entry.Value, entry.Size);
     }
 }

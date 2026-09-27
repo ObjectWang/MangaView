@@ -65,6 +65,22 @@ public sealed class DecodeScheduler : IDisposable
     public int InFlightCount { get { lock (_gate) return _inFlight.Count; } }
     public int QueuedCount { get { lock (_gate) return _queue.Count; } }
 
+    /// <summary>取消尚未开始的排队任务；在途任务继续完成，以便单页快速翻页时不堆积旧页。</summary>
+    public int CancelQueued()
+    {
+        List<Pending> canceled;
+        lock (_gate)
+        {
+            canceled = new List<Pending>(_queue);
+            _queue.Clear();
+            _queued.Clear();
+        }
+
+        foreach (var item in canceled)
+            item.Tcs.TrySetCanceled();
+        return canceled.Count;
+    }
+
     public Task<object?> RequestAsync(DecodeRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);

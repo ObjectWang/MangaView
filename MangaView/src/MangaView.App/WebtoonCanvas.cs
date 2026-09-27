@@ -18,20 +18,51 @@ public sealed class WebtoonCanvas : FrameworkElement
     private WebtoonLayout? _layout;
     private double _gap = 8;
     private double _offset;
+    private double _viewportWidth;
     private double _viewportHeight;
-    private readonly LruCache<BitmapSource> _cache = new(512L * 1024 * 1024);
+    private readonly LruCache<object> _cache = new(512L * 1024 * 1024);
     private readonly DecodeScheduler _scheduler = new(new WpfDecodeWorker(), maxConcurrent: 2);
     private readonly HashSet<string> _failed = new();
+    private readonly HashSet<AnimatedImageSource> _animatedSubscriptions = new();
 
     public event Action<double>? OffsetChangeRequested;
     public event Action<int, int>? CurrentPageChanged;
     public int CurrentPageIndex { get; private set; } = -1;
     public int PageCount => _pages.Count;
+    public double TotalHeight => _layout?.TotalHeight ?? 0;
+
+    /// <summary>当前滚动锚点：页码 + 页内偏移，用于阅读进度保存/恢复。</summary>
+    public ScrollAnchor CurrentAnchor => _layout?.GetAnchor(_offset) ?? default;
+
+    public void JumpToAnchor(ScrollAnchor anchor)
+    {
+        if (_layout is null || _pages.Count == 0) return;
+        OffsetChangeRequested?.Invoke(_layout.OffsetFromAnchor(anchor));
+    }
+
+    public double OffsetFromAnchor(ScrollAnchor anchor) =>
+        _layout is null || _pages.Count == 0 ? 0 : _layout.OffsetFromAnchor(anchor);
+
+    public void JumpToOffset(double offset) => OffsetChangeRequested?.Invoke(Math.Max(0, offset));
+
+    public void SetViewport(double width, double height)
+    {
+        double nextWidth = Math.Max(0, width);
+        _viewportHeight = Math.Max(0, height);
+        if (Math.Abs(nextWidth - _viewportWidth) < 0.5) return;
+        _viewportWidth = nextWidth;
+        RebuildLayout(preserveAnchor: true);
+        InvalidateVisual();
+    }
 
     public WebtoonCanvas()
     {
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.Linear);
-        _cache.ItemEvicted += (_, _, _) => Dispatcher.BeginInvoke(InvalidateVisual);
+        _cache.ItemEvicted += (_, value, _) =>
+        {
+            if (value is IDisposable disposable) disposable.Dispose();
+            Dispatcher.BeginInvoke(InvalidateVisual);
+        };
     }
 
     public double Gap
@@ -47,6 +78,7 @@ public sealed class WebtoonCanvas : FrameworkElement
 
     public void SetPages(IReadOnlyList<ImagePage> pages)
     {
+        DetachAnimated();
         _pages = pages ?? Array.Empty<ImagePage>();
         _cache.Clear();
         _failed.Clear();
@@ -65,7 +97,8 @@ public sealed class WebtoonCanvas : FrameworkElement
         double bottom = verticalOffset + Math.Max(1, viewportHeight);
         RequestDecodes(verticalOffset, bottom);
         InvalidateVisual();
-        UpdateCurrentPage(verticalOffset + viewportHeight * 0.5);
+        // Webtoon 页码按视口顶部附近判定，确保“跳转到第 N 页”后立即显示 N。
+        UpdateCurrentPage(verticalOffset + Math.Min(viewportHeight * 0.15, 120));
     }
 
     public void JumpToPage(int index)
@@ -77,7 +110,7 @@ public sealed class WebtoonCanvas : FrameworkElement
 
     private void RebuildLayout(bool preserveAnchor)
     {
-        double width = Math.Max(1, ActualWidth);
+        double width = Math.Max(1, ActualWidth > 0 ? ActualWidth : _viewportWidth);
         WebtoonLayout? old = _layout;
         ScrollAnchor anchor = old is not null && preserveAnchor ? old.GetAnchor(_offset) : default;
         _layout = new WebtoonLayout(_pages, width, _gap);
@@ -92,7 +125,7 @@ public sealed class WebtoonCanvas : FrameworkElement
         }
         else
         {
-            OffsetChangeRequested?.Invoke(0);
+            _offset = 0;
         }
     }
 
@@ -126,7 +159,7 @@ public sealed class WebtoonCanvas : FrameworkElement
         var page = _pages[index];
         // 不放大小图：解码宽度 = min(视口宽, 原图宽)
         int decodeWidth = Math.Min(viewportWidth, Math.Max(1, page.Width));
-        string key = CacheKey(index, decodeWidth);
+        string key = CacheKey(index, decodeWidth, page.Path);
         if (_failed.Contains(key) || _cache.TryGet(key, out _)) return;
 
         var request = new DecodeRequest(key, index, page.Path, decodeWidth, priority);
@@ -141,10 +174,13 @@ public sealed class WebtoonCanvas : FrameworkElement
                 });
                 return;
             }
-            if (t.Result is BitmapSource bmp)
+            if (t.Result is { } decoded)
             {
-                long bytes = (long)Math.Max(1, bmp.PixelWidth) * Math.Max(1, bmp.PixelHeight) * 4;
-                _cache.Put(key, bmp, bytes);
+                long bytes = decoded is AnimatedImageSource animated
+                    ? animated.EstimatedBytes
+                    : (long)Math.Max(1, ((BitmapSource)decoded).PixelWidth) *
+                      Math.Max(1, ((BitmapSource)decoded).PixelHeight) * 4;
+                _cache.Put(key, decoded, bytes);
                 Dispatcher.BeginInvoke(InvalidateVisual);
             }
         }, TaskScheduler.Default);
@@ -165,11 +201,11 @@ public sealed class WebtoonCanvas : FrameworkElement
             double pageHeight = _layout.PageHeight(i);
             Rect rect = new(0, pageTop, width, pageHeight);
             int decodeWidth = Math.Min((int)Math.Ceiling(width), Math.Max(1, _pages[i].Width));
-            string key = CacheKey(i, decodeWidth);
+            string key = CacheKey(i, decodeWidth, _pages[i].Path);
 
-            if (_cache.TryGet(key, out var bmp))
+            if (_cache.TryGet(key, out var decoded))
             {
-                dc.DrawImage(bmp, rect);
+                dc.DrawImage(GetFrame(decoded), rect);
             }
             else
             {
@@ -212,7 +248,24 @@ public sealed class WebtoonCanvas : FrameworkElement
         }
     }
 
-    private static string CacheKey(int index, int decodeWidth) => $"p{index}:w{decodeWidth}";
+    private BitmapSource GetFrame(object decoded)
+    {
+        if (decoded is not AnimatedImageSource animated) return (BitmapSource)decoded;
+        if (_animatedSubscriptions.Add(animated))
+            animated.FrameChanged += OnAnimatedFrameChanged;
+        return animated.CurrentFrame;
+    }
+
+    private void OnAnimatedFrameChanged() =>
+        Dispatcher.BeginInvoke(new Action(InvalidateVisual));
+
+    private void DetachAnimated()
+    {
+        foreach (var animated in _animatedSubscriptions)
+            animated.FrameChanged -= OnAnimatedFrameChanged;
+        _animatedSubscriptions.Clear();
+    }
+
+    private static string CacheKey(int index, int decodeWidth, string path) =>
+        $"p{index}:w{decodeWidth}:{path}";
 }
-
-
